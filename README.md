@@ -11,6 +11,7 @@ It is designed for the exact workflow where you want to focus on a markdown note
 - Tap the document to reveal or hide the surrounding Obsidian interface
 - Scrolling and long presses do not toggle the interface
 - Works from any active pane, not only Excalidraw
+- Lets you choose enabled file types with checkboxes in the plugin settings
 - Hides sidebars, ribbons, tab headers, status bar, and other panes
 - On mobile, asks Obsidian's native bridge to hide the phone status bar while focused
 - Cleans up automatically if the plugin is disabled or reloaded
@@ -44,7 +45,7 @@ Then enable `Focus Mode` in `Settings -> Community plugins`.
 
 ## Usage
 
-Focus mode starts automatically. Tap inside the document to reveal or hide the surrounding Obsidian interface. You can also run the command:
+Focus mode starts automatically for the file types selected in `Settings -> Focus Mode`. The supported choices are `.md`, `.canvas`, `.html`, `.pdf`, and `.base`. Tap inside an enabled document to reveal or hide the surrounding Obsidian interface. You can also run the command:
 
 - `Focus Mode: Toggle focus mode`
 

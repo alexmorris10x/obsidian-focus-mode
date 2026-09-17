@@ -12,9 +12,11 @@ const SHOW_CLASS = "focus-mode-visible";
 const EMBEDDED_POINTER_MESSAGE = "10x-focus-mode-pointer";
 const TAP_MAX_MOVEMENT_PX = 12;
 const TAP_MAX_DURATION_MS = 600;
+const SUPPORTED_FILE_EXTENSIONS = ["md", "canvas", "html", "pdf", "base"] as const;
 
 interface FocusModeSettings {
   showToggleNotices: boolean;
+  fileExtensions: string[];
 }
 
 interface TapGesture {
@@ -50,6 +52,7 @@ interface CapacitorBridge {
 
 const DEFAULT_SETTINGS: FocusModeSettings = {
   showToggleNotices: false,
+  fileExtensions: ["html"],
 };
 
 export default class FocusModePlugin extends Plugin {
@@ -105,7 +108,9 @@ export default class FocusModePlugin extends Plugin {
       window.setTimeout(() => {
         const leaf = this.app.workspace.activeLeaf;
         if (leaf) {
-          this.enableFocusMode(leaf, false);
+          this.enabled = true;
+          this.activeLeaf = leaf;
+          this.reapplyFocusMode();
         }
       }, 0);
     });
@@ -118,6 +123,15 @@ export default class FocusModePlugin extends Plugin {
   }
 
   private toggleFocusMode(showNotice: boolean, targetLeaf?: WorkspaceLeaf): void {
+    const leaf = targetLeaf ?? this.app.workspace.activeLeaf;
+
+    if (!leaf || !this.isLeafAllowed(leaf)) {
+      if (showNotice) {
+        new Notice("Focus Mode: this file type is not enabled in settings.");
+      }
+      return;
+    }
+
     if (this.enabled) {
       this.clearFocusMode();
       if (showNotice) {
@@ -125,8 +139,6 @@ export default class FocusModePlugin extends Plugin {
       }
       return;
     }
-
-    const leaf = targetLeaf ?? this.app.workspace.activeLeaf;
 
     if (!leaf?.view?.containerEl) {
       new Notice("Focus Mode: there is no active pane to focus.");
@@ -137,6 +149,10 @@ export default class FocusModePlugin extends Plugin {
   }
 
   private enableFocusMode(leaf: WorkspaceLeaf, showNotice: boolean): void {
+    if (!this.isLeafAllowed(leaf)) {
+      return;
+    }
+
     const applied = this.applyFocusMode(leaf);
 
     if (!applied) {
@@ -159,7 +175,7 @@ export default class FocusModePlugin extends Plugin {
     }
 
     const leaf = this.findLeafContaining(event.target);
-    if (!leaf) {
+    if (!leaf || !this.isLeafAllowed(leaf)) {
       this.tapGesture = null;
       return;
     }
@@ -196,7 +212,7 @@ export default class FocusModePlugin extends Plugin {
     }
 
     const leaf = this.findLeafContaining(frame);
-    if (!leaf) {
+    if (!leaf || !this.isLeafAllowed(leaf)) {
       return;
     }
 
@@ -328,9 +344,13 @@ export default class FocusModePlugin extends Plugin {
   }
 
   private async loadSettings(): Promise<void> {
+    const savedSettings = await this.loadData() as Partial<FocusModeSettings> | null;
     this.settings = {
       ...DEFAULT_SETTINGS,
-      ...await this.loadData() as Partial<FocusModeSettings>,
+      ...savedSettings,
+      fileExtensions: this.normalizeFileExtensions(
+        savedSettings?.fileExtensions ?? DEFAULT_SETTINGS.fileExtensions,
+      ),
     };
   }
 
@@ -348,6 +368,32 @@ export default class FocusModePlugin extends Plugin {
       ...settings,
     };
     await this.saveSettings();
+
+    if (this.enabled) {
+      this.reapplyFocusMode();
+    }
+  }
+
+  normalizeFileExtensions(value: unknown): string[] {
+    const extensions = Array.isArray(value) ? value : String(value ?? "").split(",");
+    return [...new Set(
+      extensions
+        .map((extension) => String(extension).trim().toLowerCase().replace(/^\./, ""))
+        .filter(Boolean),
+    )];
+  }
+
+  getAvailableFileExtensions(): string[] {
+    return [...SUPPORTED_FILE_EXTENSIONS];
+  }
+
+  private isLeafAllowed(leaf: WorkspaceLeaf | null): boolean {
+    const extension = (leaf?.view as WorkspaceLeaf["view"] & {
+      file?: { extension?: string };
+    })?.file?.extension;
+
+    return typeof extension === "string"
+      && this.settings.fileExtensions.includes(extension.toLowerCase());
   }
 
   private showToggleNotice(message: string): void {
@@ -358,6 +404,12 @@ export default class FocusModePlugin extends Plugin {
 
   private reapplyFocusMode(): void {
     const leaf = this.getTargetLeaf();
+
+    if (leaf?.view?.containerEl && !this.isLeafAllowed(leaf)) {
+      this.clearMarkedElements();
+      this.showNativeStatusBar();
+      return;
+    }
 
     if (!leaf?.view?.containerEl) {
       this.clearFocusMode();
@@ -383,6 +435,10 @@ export default class FocusModePlugin extends Plugin {
   }
 
   private applyFocusMode(leaf: WorkspaceLeaf): boolean {
+    if (!this.isLeafAllowed(leaf)) {
+      return false;
+    }
+
     const contentEl = this.getContentElement(leaf);
 
     if (!(contentEl instanceof HTMLElement)) {
@@ -607,6 +663,33 @@ class FocusModeSettingTab extends PluginSettingTab {
 
   display(): void {
     this.containerEl.empty();
+
+    new Setting(this.containerEl)
+      .setName("File types")
+      .setDesc("Choose which file types use Focus Mode.")
+      .setHeading();
+
+    for (const extension of this.focusModePlugin.getAvailableFileExtensions()) {
+      new Setting(this.containerEl)
+        .setName(`.${extension}`)
+        .addToggle((toggle) => {
+          toggle
+            .setValue(this.focusModePlugin.getSettings().fileExtensions.includes(extension))
+            .onChange(async (enabled) => {
+              const selected = new Set(this.focusModePlugin.getSettings().fileExtensions);
+
+              if (enabled) {
+                selected.add(extension);
+              } else {
+                selected.delete(extension);
+              }
+
+              await this.focusModePlugin.updateSettings({
+                fileExtensions: [...selected].sort(),
+              });
+            });
+        });
+    }
 
     new Setting(this.containerEl)
       .setName("Show toggle notifications")

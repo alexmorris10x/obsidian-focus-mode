@@ -29,8 +29,10 @@ var SHOW_CLASS = "focus-mode-visible";
 var EMBEDDED_POINTER_MESSAGE = "10x-focus-mode-pointer";
 var TAP_MAX_MOVEMENT_PX = 12;
 var TAP_MAX_DURATION_MS = 600;
+var SUPPORTED_FILE_EXTENSIONS = ["md", "canvas", "html", "pdf", "base"];
 var DEFAULT_SETTINGS = {
-  showToggleNotices: false
+  showToggleNotices: false,
+  fileExtensions: ["html"]
 };
 var FocusModePlugin = class extends import_obsidian.Plugin {
   constructor() {
@@ -48,7 +50,7 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
         return;
       }
       const leaf = this.findLeafContaining(event.target);
-      if (!leaf) {
+      if (!leaf || !this.isLeafAllowed(leaf)) {
         this.tapGesture = null;
         return;
       }
@@ -77,7 +79,7 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
         return;
       }
       const leaf = this.findLeafContaining(frame);
-      if (!leaf) {
+      if (!leaf || !this.isLeafAllowed(leaf)) {
         return;
       }
       if (message.phase === "down") {
@@ -136,7 +138,9 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
       window.setTimeout(() => {
         const leaf = this.app.workspace.activeLeaf;
         if (leaf) {
-          this.enableFocusMode(leaf, false);
+          this.enabled = true;
+          this.activeLeaf = leaf;
+          this.reapplyFocusMode();
         }
       }, 0);
     });
@@ -147,6 +151,13 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
     this.styleEl = null;
   }
   toggleFocusMode(showNotice, targetLeaf) {
+    const leaf = targetLeaf ?? this.app.workspace.activeLeaf;
+    if (!leaf || !this.isLeafAllowed(leaf)) {
+      if (showNotice) {
+        new import_obsidian.Notice("Focus Mode: this file type is not enabled in settings.");
+      }
+      return;
+    }
     if (this.enabled) {
       this.clearFocusMode();
       if (showNotice) {
@@ -154,7 +165,6 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
       }
       return;
     }
-    const leaf = targetLeaf ?? this.app.workspace.activeLeaf;
     if (!leaf?.view?.containerEl) {
       new import_obsidian.Notice("Focus Mode: there is no active pane to focus.");
       return;
@@ -162,6 +172,9 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
     this.enableFocusMode(leaf, showNotice);
   }
   enableFocusMode(leaf, showNotice) {
+    if (!this.isLeafAllowed(leaf)) {
+      return;
+    }
     const applied = this.applyFocusMode(leaf);
     if (!applied) {
       new import_obsidian.Notice("Focus Mode: could not determine the active pane container.");
@@ -250,9 +263,13 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
     return message;
   }
   async loadSettings() {
+    const savedSettings = await this.loadData();
     this.settings = {
       ...DEFAULT_SETTINGS,
-      ...await this.loadData()
+      ...savedSettings,
+      fileExtensions: this.normalizeFileExtensions(
+        savedSettings?.fileExtensions ?? DEFAULT_SETTINGS.fileExtensions
+      )
     };
   }
   async saveSettings() {
@@ -267,6 +284,22 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
       ...settings
     };
     await this.saveSettings();
+    if (this.enabled) {
+      this.reapplyFocusMode();
+    }
+  }
+  normalizeFileExtensions(value) {
+    const extensions = Array.isArray(value) ? value : String(value ?? "").split(",");
+    return [...new Set(
+      extensions.map((extension) => String(extension).trim().toLowerCase().replace(/^\./, "")).filter(Boolean)
+    )];
+  }
+  getAvailableFileExtensions() {
+    return [...SUPPORTED_FILE_EXTENSIONS];
+  }
+  isLeafAllowed(leaf) {
+    const extension = leaf?.view?.file?.extension;
+    return typeof extension === "string" && this.settings.fileExtensions.includes(extension.toLowerCase());
   }
   showToggleNotice(message) {
     if (this.settings.showToggleNotices) {
@@ -275,6 +308,11 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
   }
   reapplyFocusMode() {
     const leaf = this.getTargetLeaf();
+    if (leaf?.view?.containerEl && !this.isLeafAllowed(leaf)) {
+      this.clearMarkedElements();
+      this.showNativeStatusBar();
+      return;
+    }
     if (!leaf?.view?.containerEl) {
       this.clearFocusMode();
       return;
@@ -294,6 +332,9 @@ var FocusModePlugin = class extends import_obsidian.Plugin {
     return this.app.workspace.activeLeaf ?? null;
   }
   applyFocusMode(leaf) {
+    if (!this.isLeafAllowed(leaf)) {
+      return false;
+    }
     const contentEl = this.getContentElement(leaf);
     if (!(contentEl instanceof HTMLElement)) {
       return false;
@@ -459,6 +500,22 @@ var FocusModeSettingTab = class extends import_obsidian.PluginSettingTab {
   }
   display() {
     this.containerEl.empty();
+    new import_obsidian.Setting(this.containerEl).setName("File types").setDesc("Choose which file types use Focus Mode.").setHeading();
+    for (const extension of this.focusModePlugin.getAvailableFileExtensions()) {
+      new import_obsidian.Setting(this.containerEl).setName(`.${extension}`).addToggle((toggle) => {
+        toggle.setValue(this.focusModePlugin.getSettings().fileExtensions.includes(extension)).onChange(async (enabled) => {
+          const selected = new Set(this.focusModePlugin.getSettings().fileExtensions);
+          if (enabled) {
+            selected.add(extension);
+          } else {
+            selected.delete(extension);
+          }
+          await this.focusModePlugin.updateSettings({
+            fileExtensions: [...selected].sort()
+          });
+        });
+      });
+    }
     new import_obsidian.Setting(this.containerEl).setName("Show toggle notifications").setDesc("Show a notice when focus mode is enabled or disabled with the command.").addToggle((toggle) => {
       toggle.setValue(this.focusModePlugin.getSettings().showToggleNotices).onChange(async (value) => {
         await this.focusModePlugin.updateSettings({ showToggleNotices: value });

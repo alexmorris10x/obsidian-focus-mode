@@ -1,9 +1,9 @@
 {
   "id": "focus-mode",
   "name": "Focus Mode",
-  "version": "0.2.1",
+  "version": "0.3.1",
   "minAppVersion": "1.5.0",
-  "description": "Default to a distraction-free view and toggle Obsidian chrome by tapping the document.",
+  "description": "Use a distraction-free view for selected file types and toggle Obsidian chrome by tapping the document.",
   "author": "10x",
   "authorUrl": "https://github.com/10x-oss",
   "isDesktopOnly": false
